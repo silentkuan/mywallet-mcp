@@ -1,0 +1,15 @@
+node_modules/
+dist/
+
+# Environment variables — NEVER commit credentials
+.env
+
+# Firebase service account JSON files
+*.json
+!package.json
+!tsconfig.json
+
+# Test artifacts
+tmp_*.json
+test-mcp-output.txt
+MCP_TEST_REPORT.md
