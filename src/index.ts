@@ -10,19 +10,6 @@ import { registerBankAccountTools } from './tools/bankAccounts.js';
 import { registerBankRecordTools } from './tools/bankRecords.js';
 import { registerProfileTools } from './tools/profile.js';
 
-// Create the MCP server instance
-const server = new McpServer({
-  name: 'mywallet-mcp',
-  version: '1.0.0',
-});
-
-// Register all tool groups
-registerTransactionTools(server);
-registerStockTools(server);
-registerBankAccountTools(server);
-registerBankRecordTools(server);
-registerProfileTools(server);
-
 // Set up Express HTTP server with StreamableHTTP transport
 const app = express();
 app.use(express.json());
@@ -60,6 +47,19 @@ app.get('/health', (_req, res) => {
 
 // MCP protocol endpoint — requires Bearer token auth
 app.all('/mcp', requireBearerToken, async (req, res) => {
+  // Create a fresh McpServer instance per request — stateless StreamableHTTP
+  // mode requires a new instance for each connection to avoid the
+  // "Already connected to a transport" error.
+  const server = new McpServer({
+    name: 'mywallet-mcp',
+    version: '1.0.0',
+  });
+  registerTransactionTools(server);
+  registerStockTools(server);
+  registerBankAccountTools(server);
+  registerBankRecordTools(server);
+  registerProfileTools(server);
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
   });
