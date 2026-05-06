@@ -30,7 +30,10 @@ MCP server for mywalletAI. Exposes personal finance CRUD tools over HTTP, backed
   "mcpServers": {
     "mywallet": {
       "type": "http",
-      "url": "https://<your-host>/mcp"
+      "url": "https://<your-host>/mcp",
+      "headers": {
+        "Authorization": "Bearer <MCP_API_KEY>"
+      }
     }
   }
 }
@@ -49,6 +52,7 @@ All variables must be set before the server starts. The server will exit immedia
 | `FIREBASE_PRIVATE_KEY` | ✅ | Firebase service account private key. Literal `\n` sequences are automatically converted to real newlines. |
 | `TARGET_USER_ID` | ✅ | Firestore user document ID. **Fixed at server startup — never accept from model input.** All tool calls operate on this user's data. |
 | `MW_PRIVACY_KEY` | ✅ | AES key matching the frontend `localStorage` key `MW_PRIVACY_KEY`. Used to decrypt encrypted Firestore fields. |
+| `MCP_API_KEY` | ✅ | Secret Bearer token that clients must supply in the `Authorization: Bearer <token>` header on every request to `/mcp`. |
 | `PORT` | ❌ | HTTP listen port. Defaults to `3000`. |
 
 ---
