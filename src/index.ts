@@ -1,5 +1,6 @@
 import './config.js'; // Load and validate env vars first — will exit if invalid
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './config.js';
@@ -26,13 +27,39 @@ registerProfileTools(server);
 const app = express();
 app.use(express.json());
 
+// Bearer token auth middleware — protects /mcp; /health remains public
+function requireBearerToken(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.get('Authorization') ?? '';
+  const prefix = 'Bearer ';
+  if (!authHeader.startsWith(prefix)) {
+    res.status(401).json({ error: 'Unauthorized', message: 'Valid Bearer token required' });
+    return;
+  }
+  const provided = authHeader.slice(prefix.length);
+  const expected = config.MCP_API_KEY;
+  // Use constant-time comparison to prevent timing attacks
+  let valid = false;
+  try {
+    valid =
+      provided.length === expected.length &&
+      timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  } catch {
+    valid = false;
+  }
+  if (!valid) {
+    res.status(401).json({ error: 'Unauthorized', message: 'Valid Bearer token required' });
+    return;
+  }
+  next();
+}
+
 // Health check endpoint — use this to verify the server is running
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', server: 'mywallet-mcp', version: '1.0.0' });
 });
 
-// MCP protocol endpoint
-app.all('/mcp', async (req, res) => {
+// MCP protocol endpoint — requires Bearer token auth
+app.all('/mcp', requireBearerToken, async (req, res) => {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
   });

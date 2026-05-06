@@ -12,6 +12,8 @@ const envSchema = z.object({
   TARGET_USER_ID: z.string().min(1),
   // AES key matching the frontend localStorage MW_PRIVACY_KEY
   MW_PRIVACY_KEY: z.string().min(1),
+  // Bearer token required on every request to /mcp
+  MCP_API_KEY: z.string().min(1),
   PORT: z.coerce.number().default(3000),
 });
 
