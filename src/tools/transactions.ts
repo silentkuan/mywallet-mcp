@@ -38,7 +38,7 @@ export function registerTransactionTools(server: McpServer): void {
     'Add a new financial transaction (income or expense).',
     {
       date: z.string().describe('Date in YYYY-MM-DD format'),
-      amount: z.number().positive().describe('Transaction amount (positive number)'),
+      amount: z.number().min(0).describe('Transaction amount (non-negative number)'),
       currency: z.enum(['MYR', 'SGD', 'USD']).describe('Currency code'),
       type: z.enum(['INCOME', 'EXPENSE']).describe('Income or expense'),
       category: z.string().min(1).describe('Category name'),
@@ -76,7 +76,7 @@ export function registerTransactionTools(server: McpServer): void {
     {
       id: z.string().describe('Transaction id to update'),
       date: z.string().optional(),
-      amount: z.number().positive().optional(),
+      amount: z.number().min(0).optional(),
       currency: z.enum(['MYR', 'SGD', 'USD']).optional(),
       type: z.enum(['INCOME', 'EXPENSE']).optional(),
       category: z.string().optional(),
