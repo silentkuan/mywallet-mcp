@@ -5,7 +5,7 @@ import { DailyNutrition, MealRecord, WaterIntakeRecord } from '../types.js';
 
 const NUTRITION_COLLECTION = 'dailyNutrition';
 const MEALS_COLLECTION = 'mealRecords';
-const WATER_COLLECTION = 'waterIntakeRecords';
+const WATER_COLLECTION = 'waterIntake';
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -115,14 +115,10 @@ export function registerNutritionTools(server: McpServer): void {
       };
       await upsertDocPlain(collectionPath(MEALS_COLLECTION), mealId, meal as unknown as Record<string, unknown>);
 
-      // Update daily nutrition totals
+      // Recalculate daily nutrition totals from all meals (getOrCreateDailyNutrition does this)
       const nutrition = await getOrCreateDailyNutrition(input.date);
       const nutritionId = `nutrition-${input.date}`;
-      nutrition.calories += input.calories;
-      nutrition.proteinG += input.proteinG;
-      nutrition.fatG += input.fatG;
-      nutrition.carbsG += input.carbsG;
-      nutrition.sodiumMg += input.sodiumMg;
+      // getOrCreateDailyNutrition already sums ALL meal records, so no need to add again
       await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
 
       return {
@@ -154,10 +150,10 @@ export function registerNutritionTools(server: McpServer): void {
       };
       await upsertDocPlain(collectionPath(WATER_COLLECTION), waterId, water as unknown as Record<string, unknown>);
 
-      // Update daily nutrition
+      // Recalculate daily nutrition (getOrCreateDailyNutrition sums all water records)
       const nutrition = await getOrCreateDailyNutrition(input.date);
       const nutritionId = `nutrition-${input.date}`;
-      nutrition.waterMl += input.amountMl;
+      // getOrCreateDailyNutrition already sums ALL water records, so no need to add again
       await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
 
       return {
@@ -211,7 +207,7 @@ export function registerNutritionTools(server: McpServer): void {
     async (input) => {
       const targetDate = input.date || todayStr();
       const nutrition = await getOrCreateDailyNutrition(targetDate);
-      const nutritionId = `nutrition-${targetDate}`;
+      const nutritionId = targetDate;
 
       if (input.calories !== undefined) nutrition.caloriesGoal = input.calories;
       if (input.proteinG !== undefined) nutrition.proteinGoalG = input.proteinG;
@@ -243,7 +239,7 @@ export function registerNutritionTools(server: McpServer): void {
 
       // Force recalculate and save daily nutrition
       const nutrition = await getOrCreateDailyNutrition(date);
-      const nutritionId = 'nutrition-' + date;
+      const nutritionId = date;
       await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
 
       return {
