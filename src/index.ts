@@ -9,6 +9,13 @@ import { registerStockTools } from './tools/stocks.js';
 import { registerBankAccountTools } from './tools/bankAccounts.js';
 import { registerBankRecordTools } from './tools/bankRecords.js';
 import { registerProfileTools } from './tools/profile.js';
+import { registerTaskTools } from './tools/tasks.js';
+import { registerReminderTools } from './tools/reminders.js';
+import { registerNutritionTools } from './tools/nutrition.js';
+import { registerTravelTools } from './tools/travel.js';
+import { registerLifeDashboardTools } from './tools/lifeDashboard.js';
+import { registerContentTemplateTools } from './tools/contentTemplates.js';
+import { registerOpenclawFileRoutes } from './openclawFilesRoutes.js';
 
 // Set up Express HTTP server with StreamableHTTP transport
 const app = express();
@@ -59,6 +66,12 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerBankAccountTools(server);
   registerBankRecordTools(server);
   registerProfileTools(server);
+  registerTaskTools(server);
+  registerReminderTools(server);
+  registerNutritionTools(server);
+  registerTravelTools(server);
+  registerLifeDashboardTools(server);
+  registerContentTemplateTools(server);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
@@ -69,6 +82,9 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
+
+// Regular REST endpoints for OpenClaw workspace file management
+registerOpenclawFileRoutes(app);
 
 app.listen(config.PORT, () => {
   console.log(`✅ mywallet-mcp running on http://localhost:${config.PORT}`);

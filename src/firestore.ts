@@ -99,8 +99,16 @@ export async function fetchCollection(path: string): Promise<Record<string, unkn
 }
 
 // Save (upsert) a document by its id field
+// Encrypts all fields except 'id'
 export async function upsertDoc(path: string, id: string, data: Record<string, unknown>): Promise<void> {
   const payload = preparePayload(data, ['id']);
+  await db.collection(path).doc(id).set(payload);
+}
+
+// Save (upsert) a document WITHOUT encryption (visible fields only)
+// Use for non-sensitive data like task templates, reminders, etc.
+export async function upsertDocPlain(path: string, id: string, data: Record<string, unknown>): Promise<void> {
+  const payload = preparePayload(data, Object.keys(data));
   await db.collection(path).doc(id).set(payload);
 }
 
