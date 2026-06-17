@@ -169,12 +169,13 @@ function calcNextDueDate(
         next.setDate(next.getDate() + 7);
         return toDateStr(next);
       }
-      const currentDay = last.getDay();
+      // Convert raw getDay() (0=Sun..6=Sat) to our 1=Mon..7=Sun system
+      const nextWeekDayMap = daysOfWeek.map(d => (d === 7 ? 0 : d));
       for (let offset = 1; offset <= 7; offset++) {
         const next = new Date(last);
         next.setDate(next.getDate() + offset);
         const dayOfWeek = next.getDay();
-        if (daysOfWeek.includes(dayOfWeek)) {
+        if (nextWeekDayMap.includes(dayOfWeek)) {
           return toDateStr(next);
         }
       }
@@ -202,12 +203,13 @@ function calcNextDueDate(
         next.setDate(next.getDate() + 1);
         return toDateStr(next);
       }
-      const currentDay = last.getDay();
+      // Convert raw getDay() (0=Sun..6=Sat) to our 1=Mon..7=Sun system
+      const nextWeekDayMap = daysOfWeek.map(d => (d === 7 ? 0 : d));
       for (let offset = 1; offset <= 14; offset++) {
         const next = new Date(last);
         next.setDate(next.getDate() + offset);
         const dayOfWeek = next.getDay();
-        if (daysOfWeek.includes(dayOfWeek)) {
+        if (nextWeekDayMap.includes(dayOfWeek)) {
           return toDateStr(next);
         }
       }
@@ -958,10 +960,17 @@ export function registerTaskTools(server: McpServer): void {
     async () => {
       const today = todayStr();
 
+      // Only consider tasks within the last 3 days as overdue
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const cutoff = toDateStr(threeDaysAgo);
+
       // Get from instances collection
       const instancesPath = collectionPath(INSTANCES_COLLECTION);
       const allInstances = (await fetchCollection(instancesPath)) as unknown as TaskInstance[];
-      const overdueFromInstances = allInstances.filter(t => t.status === 'pending' && t.dueDate < today);
+      const overdueFromInstances = allInstances.filter(
+        t => t.status === 'pending' && t.dueDate < today && t.dueDate >= cutoff
+      );
 
       // Get from templates + completions
       const templatesPath = collectionPath(TEMPLATES_COLLECTION);
@@ -989,12 +998,13 @@ export function registerTaskTools(server: McpServer): void {
             const daysSince = Math.floor(
               (new Date(today).getTime() - new Date(lastDate).getTime()) / (86400000)
             );
-            // Count all missed days
+            // Count missed days within the last 3 days
             for (let i = 1; i < daysSince; i++) {
               const missedDate = new Date(lastDate + 'T12:00:00');
               missedDate.setDate(missedDate.getDate() + i);
               const missedDateStr = toDateStr(missedDate);
               if (missedDateStr >= today) break;
+              if (missedDateStr < cutoff) continue;  // Skip tasks older than 3 days
 
               // Check if already covered by instances
               const existsInInstances = overdueFromInstances.some(
@@ -1037,6 +1047,7 @@ export function registerTaskTools(server: McpServer): void {
             const rangeDays = dateRange(weekRange.startDate, weekRange.endDate);
             for (const day of rangeDays) {
               if (day >= today) break;
+              if (day < cutoff) continue;  // Skip tasks older than 3 days
               const date = new Date(day + 'T12:00:00');
               const dayNum = date.getDay() === 0 ? 7 : date.getDay();
               if (daysOfWeek.includes(dayNum)) {
@@ -1079,7 +1090,7 @@ export function registerTaskTools(server: McpServer): void {
           }
           // nextDueDates now has the next expected due date
           for (const nextDue of nextDueDates) {
-            if (nextDue < today) {
+            if (nextDue < today && nextDue >= cutoff) {
               const existsInInstances = overdueFromInstances.some(
                 inst => inst.templateId === tmpl.id && inst.dueDate === nextDue
               );
