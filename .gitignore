@@ -8,3 +8,7 @@ dist/
 *.json
 !package.json
 !tsconfig.json
+
+# Local env backups
+.env.*
+!.env.example

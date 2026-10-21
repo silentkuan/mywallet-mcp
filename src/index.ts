@@ -12,6 +12,12 @@ import { registerProfileTools } from './tools/profile.js';
 import { registerTaskTools } from './tools/tasks.js';
 import { registerReminderTools } from './tools/reminders.js';
 import { registerNutritionTools } from './tools/nutrition.js';
+import { registerHealthProfileTools } from './tools/healthProfile.js';
+import { registerBodyScanTools } from './tools/bodyScans.js';
+import { registerLabReportTools } from './tools/labReports.js';
+import { registerWorkoutTools } from './tools/workouts.js';
+import { registerDailyMetricsTools } from './tools/dailyMetrics.js';
+import { registerHealthOverviewTools, HEALTH_INSTRUCTIONS } from './tools/healthOverview.js';
 import { registerTravelTools } from './tools/travel.js';
 import { registerLifeDashboardTools } from './tools/lifeDashboard.js';
 import { registerContentTemplateTools } from './tools/contentTemplates.js';
@@ -49,7 +55,7 @@ function requireBearerToken(req: Request, res: Response, next: NextFunction): vo
 
 // Health check endpoint — use this to verify the server is running
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', server: 'mywallet-mcp', version: '1.0.0' });
+  res.json({ status: 'ok', server: 'mywallet-mcp', version: '1.1.0' });
 });
 
 // MCP protocol endpoint — requires Bearer token auth
@@ -57,10 +63,10 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   // Create a fresh McpServer instance per request — stateless StreamableHTTP
   // mode requires a new instance for each connection to avoid the
   // "Already connected to a transport" error.
-  const server = new McpServer({
-    name: 'mywallet-mcp',
-    version: '1.0.0',
-  });
+  const server = new McpServer(
+    { name: 'mywallet-mcp', version: '1.1.0' },
+    { instructions: HEALTH_INSTRUCTIONS },
+  );
   registerTransactionTools(server);
   registerStockTools(server);
   registerBankAccountTools(server);
@@ -69,6 +75,12 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerTaskTools(server);
   registerReminderTools(server);
   registerNutritionTools(server);
+  registerHealthProfileTools(server);
+  registerBodyScanTools(server);
+  registerLabReportTools(server);
+  registerWorkoutTools(server);
+  registerDailyMetricsTools(server);
+  registerHealthOverviewTools(server);
   registerTravelTools(server);
   registerLifeDashboardTools(server);
   registerContentTemplateTools(server);

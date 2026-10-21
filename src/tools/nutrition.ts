@@ -1,85 +1,136 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { collectionPath, fetchCollection, fetchNamedDoc, upsertDoc, upsertDocPlain, deleteDocById } from '../firestore.js';
-import { DailyNutrition, MealRecord, WaterIntakeRecord } from '../types.js';
+import {
+  HEALTH_COLLECTIONS, NUTRIENTS, NUTRIENT_KEYS, NutrientKey, NutrientTotals, NutritionTargets, TargetStatus,
+  dateSchema, generateId, nowISO, todayStr, addDays, round, jsonResult, mergePatch, emptyTotals, evaluate,
+  optionalNutrientShape, saveHealthDoc, listHealthDocs, getHealthDoc, deleteHealthDoc,
+} from './healthCommon.js';
+import { loadHealthProfile, effectiveTargets } from './healthProfile.js';
 
-const NUTRITION_COLLECTION = 'dailyNutrition';
-const MEALS_COLLECTION = 'mealRecords';
-const WATER_COLLECTION = 'waterIntake';
+const MEALS = HEALTH_COLLECTIONS.meals;
+const WATER = HEALTH_COLLECTIONS.water;
+const FOODS = HEALTH_COLLECTIONS.foods;
 
-function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'drink', 'supplement'] as const;
 
-function todayStr(): string {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
+export type Meal = {
+  id: string; date: string; time?: string; mealType: (typeof MEAL_TYPES)[number]; description: string;
+  foodId?: string; servings?: number; estimated?: boolean; recordedAt: string; updatedAt?: string;
+} & Partial<NutrientTotals>;
 
-function nowISO(): string {
-  return new Date().toISOString();
-}
+export type WaterLog = { id: string; date: string; amountMl: number; recordedAt: string; source?: string };
 
-const DEFAULT_GOALS = {
-  caloriesGoal: 2000,
-  proteinGoalG: 60,
-  fatMinGoalG: 50,
-  fatMaxGoalG: 80,
-  sodiumGoalMg: 2400,
-  waterGoalMl: 2000,
+export type Food = {
+  id: string; name: string; aliases?: string[]; serving: string; brand?: string; notes?: string;
+  createdAt: string; updatedAt?: string;
+} & Partial<NutrientTotals>;
+
+const coreNutrientShape = {
+  calories: z.number().min(0).describe('热量（千卡）'),
+  proteinG: z.number().min(0).describe('蛋白质（克）'),
+  fatG: z.number().min(0).describe('脂肪（克）'),
+  carbsG: z.number().min(0).describe('碳水（克）'),
+  sodiumMg: z.number().min(0).describe('钠（毫克）'),
 };
 
-/**
- * Fetch or create daily nutrition doc for a given date.
- * If doc doesn't exist, returns a blank one with default goals.
- */
-async function getOrCreateDailyNutrition(date: string): Promise<DailyNutrition> {
-  const path = collectionPath(NUTRITION_COLLECTION);
-  const all = (await fetchCollection(path)) as unknown as DailyNutrition[];
-  const existing = all.find((d: DailyNutrition) => d.date === date);
+// Meals logged from the finance page before this change only carried calories, with macros stored as 0.
+// Treat those zeros as "not recorded" rather than "zero grams".
+function isCaloriesOnly(m: Partial<NutrientTotals>): boolean {
+  return (m.calories ?? 0) > 0 && !m.proteinG && !m.fatG && !m.carbsG;
+}
 
-  if (existing) {
-    // Recalculate from meal records and water records for accuracy
-    const meals = (await fetchCollection(collectionPath(MEALS_COLLECTION))) as unknown as MealRecord[];
-    const waters = (await fetchCollection(collectionPath(WATER_COLLECTION))) as unknown as WaterIntakeRecord[];
-    const todayMeals = meals.filter(m => m.date === date);
-    const todayWaters = waters.filter(w => w.date === date);
+function hasValue(m: Partial<NutrientTotals>, k: NutrientKey): boolean {
+  return typeof m[k] === 'number' && !(k !== 'calories' && isCaloriesOnly(m));
+}
 
-    const totals = todayMeals.reduce(
-      (acc, m) => {
-        acc.calories += m.calories || 0;
-        acc.proteinG += m.proteinG || 0;
-        acc.fatG += m.fatG || 0;
-        acc.carbsG += m.carbsG || 0;
-        acc.sodiumMg += m.sodiumMg || 0;
-        return acc;
-      },
-      { calories: 0, proteinG: 0, fatG: 0, carbsG: 0, sodiumMg: 0 }
-    );
+function sumNutrients(meals: Partial<NutrientTotals>[]): { totals: NutrientTotals; recorded: Set<NutrientKey> } {
+  const totals = emptyTotals();
+  const recorded = new Set<NutrientKey>();
+  for (const m of meals) for (const k of NUTRIENT_KEYS) if (hasValue(m, k)) { totals[k] += m[k]!; recorded.add(k); }
+  for (const k of NUTRIENT_KEYS) totals[k] = round(totals[k], 1);
+  return { totals, recorded };
+}
 
-    const waterTotal = todayWaters.reduce((acc, w) => acc + (w.amountMl || 0), 0);
+// Fraction of meals that recorded each nutrient, so "0 g fiber" can be told apart
+// from "fiber was never estimated".
+function coverage(meals: Partial<NutrientTotals>[]): Record<NutrientKey, number> {
+  return Object.fromEntries(NUTRIENT_KEYS.map(k => [
+    k, meals.length ? round(meals.filter(m => hasValue(m, k)).length / meals.length, 2) : 0,
+  ])) as Record<NutrientKey, number>;
+}
 
-    const updated: DailyNutrition = {
-      ...existing,
-      ...totals,
-      waterMl: waterTotal,
-    };
-    return updated;
+function compare(totals: Partial<Record<string, number>>, targets: NutritionTargets, recorded: Set<string>) {
+  const rows: Record<string, { value: number | null; unit: string; min?: number; max?: number; status: TargetStatus }> = {};
+  for (const k of [...NUTRIENT_KEYS, 'waterMl'] as const) {
+    const t = targets[k];
+    const unit = k === 'waterMl' ? 'ml' : NUTRIENTS[k as NutrientKey].unit;
+    if (!recorded.has(k)) { rows[k] = { value: null, unit, min: t?.min, max: t?.max, status: 'no_data' }; continue; }
+    const value = totals[k] ?? 0;
+    rows[k] = { value, unit, min: t?.min, max: t?.max, status: evaluate(value, t) };
+  }
+  return rows;
+}
+
+export async function listMeals(startDate?: string, endDate?: string): Promise<Meal[]> {
+  const meals = await listHealthDocs<Meal>(MEALS, startDate, endDate);
+  return meals.sort((a, b) => `${b.date} ${b.time ?? b.recordedAt}`.localeCompare(`${a.date} ${a.time ?? a.recordedAt}`));
+}
+
+// Per-day intake, averages over logged days, and status against targets
+export async function nutritionSummary(startDate: string, endDate: string) {
+  const [meals, water, profile] = await Promise.all([
+    listMeals(startDate, endDate),
+    listHealthDocs<WaterLog>(WATER, startDate, endDate),
+    loadHealthProfile(),
+  ]);
+  const targets = effectiveTargets(profile);
+
+  const days: Record<string, { meals: Meal[]; waterMl: number }> = {};
+  for (const m of meals) (days[m.date] ??= { meals: [], waterMl: 0 }).meals.push(m);
+  for (const w of water) (days[w.date] ??= { meals: [], waterMl: 0 }).waterMl += w.amountMl || 0;
+
+  const daily = Object.entries(days)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, d]) => {
+      const { totals, recorded } = sumNutrients(d.meals);
+      const recordedKeys = new Set<string>(recorded);
+      if (d.waterMl > 0) recordedKeys.add('waterMl');
+      const dayTotals = { ...totals, waterMl: d.waterMl };
+      return { date, mealCount: d.meals.length, totals: dayTotals, recorded: [...recordedKeys], vsTarget: compare(dayTotals, targets, recordedKeys) };
+    });
+
+  // Average each nutrient over the days that actually recorded it
+  const loggedDays = daily.filter(d => d.mealCount > 0);
+  const average: Record<string, number> = {};
+  const averagedOver: Record<string, number> = {};
+  for (const k of [...NUTRIENT_KEYS, 'waterMl'] as const) {
+    const withData = daily.filter(d => d.recorded.includes(k));
+    averagedOver[k] = withData.length;
+    if (withData.length) average[k] = round(withData.reduce((s, d) => s + (d.totals[k] ?? 0), 0) / withData.length, 1);
+  }
+  const vsTarget = compare(average, targets, new Set(Object.keys(average)));
+
+  // How many logged days each nutrient was out of range — "sodium high on 5 of 7 days"
+  const outOfRange: Record<string, { low: number; high: number }> = {};
+  for (const d of loggedDays) {
+    for (const [k, row] of Object.entries(d.vsTarget)) {
+      if (row.status === 'low' || row.status === 'high') (outOfRange[k] ??= { low: 0, high: 0 })[row.status]++;
+    }
   }
 
-  // Return blank with defaults
   return {
-    date,
-    calories: 0,
-    proteinG: 0,
-    fatG: 0,
-    carbsG: 0,
-    sodiumMg: 0,
-    waterMl: 0,
-    ...DEFAULT_GOALS,
+    startDate, endDate,
+    loggedDays: loggedDays.length,
+    totalDays: Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86400000) + 1,
+    averagePerLoggedDay: average,
+    daysWithDataPerNutrient: averagedOver,
+    vsTarget,
+    shortfalls: Object.entries(vsTarget).filter(([, r]) => r.status === 'low').map(([k]) => k),
+    excesses: Object.entries(vsTarget).filter(([, r]) => r.status === 'high').map(([k]) => k),
+    daysOutOfRange: outOfRange,
+    nutrientCoverage: coverage(meals),
+    targets,
+    daily,
   };
 }
 
@@ -87,167 +138,175 @@ export function registerNutritionTools(server: McpServer): void {
 
   server.tool(
     'log_meal',
-    '记录一餐的详细营养信息。系统会自动累加到当天的每日营养总览中。',
+    '记录一餐。热量、蛋白质、脂肪、碳水、钠必填；饱和脂肪、纤维、糖、胆固醇、钾等也要尽量估算（降胆固醇要看饱和脂肪和纤维）。可传 foodId + servings 直接使用食物库的营养数据（显式传入的数值优先）。估算出来的数值设 estimated=true。',
     {
-      date: z.string().describe('日期 YYYY-MM-DD'),
-      mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack', 'drink']).describe('餐别'),
-      description: z.string().min(1).describe('食物描述，如「鸡胸肉沙拉 + 糙米饭」'),
-      calories: z.number().min(0).describe('热量（千卡）'),
-      proteinG: z.number().min(0).describe('蛋白质（克）'),
-      fatG: z.number().min(0).describe('脂肪（克）'),
-      carbsG: z.number().min(0).describe('碳水（克）'),
-      sodiumMg: z.number().min(0).describe('钠（毫克）'),
+      date: dateSchema.describe('日期 YYYY-MM-DD'),
+      time: z.string().optional().describe('HH:mm'),
+      mealType: z.enum(MEAL_TYPES).describe('餐别'),
+      description: z.string().min(1).describe('吃了什么，如「鸡胸肉沙拉 + 糙米饭」'),
+      foodId: z.string().optional().describe('食物库 ID（来自 search_foods）'),
+      servings: z.number().positive().optional().describe('份数，配合 foodId，默认 1'),
+      estimated: z.boolean().optional().describe('营养数据是估算的（如从照片判断）'),
+      calories: coreNutrientShape.calories.optional(),
+      proteinG: coreNutrientShape.proteinG.optional(),
+      fatG: coreNutrientShape.fatG.optional(),
+      carbsG: coreNutrientShape.carbsG.optional(),
+      sodiumMg: coreNutrientShape.sodiumMg.optional(),
+      ...optionalNutrientShape,
     },
     async (input) => {
-      // Create meal record
-      const mealId = generateId('meal');
-      const meal: MealRecord = {
-        id: mealId,
-        date: input.date,
-        mealType: input.mealType,
-        description: input.description,
-        calories: input.calories,
-        proteinG: input.proteinG,
-        fatG: input.fatG,
-        carbsG: input.carbsG,
-        sodiumMg: input.sodiumMg,
-        recordedAt: nowISO(),
-      };
-      await upsertDocPlain(collectionPath(MEALS_COLLECTION), mealId, meal as unknown as Record<string, unknown>);
+      const { foodId, servings, ...rest } = input;
+      const nutrients: Partial<NutrientTotals> = {};
+      if (foodId) {
+        const food = await getHealthDoc<Food>(FOODS, foodId);
+        if (!food) return jsonResult({ success: false, error: `Food ${foodId} not found in library` });
+        const n = servings ?? 1;
+        for (const k of NUTRIENT_KEYS) if (typeof food[k] === 'number') nutrients[k] = round(food[k]! * n, 1);
+      }
+      for (const k of NUTRIENT_KEYS) if (typeof rest[k] === 'number') nutrients[k] = rest[k];
+      const missing = (['calories', 'proteinG', 'fatG', 'carbsG', 'sodiumMg'] as const).filter(k => typeof nutrients[k] !== 'number');
+      if (missing.length) return jsonResult({ success: false, error: `Missing required nutrients: ${missing.join(', ')}` });
 
-      // Recalculate daily nutrition totals from all meals (getOrCreateDailyNutrition does this)
-      const nutrition = await getOrCreateDailyNutrition(input.date);
-      const nutritionId = `nutrition-${input.date}`;
-      // getOrCreateDailyNutrition already sums ALL meal records, so no need to add again
-      await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ success: true, meal, dailyNutrition: nutrition }, null, 2),
-        }],
+      const id = generateId('meal');
+      const meal: Meal = {
+        id, date: rest.date, time: rest.time, mealType: rest.mealType, description: rest.description,
+        foodId, servings: foodId ? (servings ?? 1) : undefined, estimated: rest.estimated,
+        ...nutrients, recordedAt: nowISO(),
       };
+      await saveHealthDoc(MEALS, id, meal as Record<string, unknown>);
+      const day = await nutritionSummary(rest.date, rest.date);
+      return jsonResult({ success: true, meal, dayTotals: day.daily[0]?.totals, dayVsTarget: day.vsTarget });
     }
   );
 
   server.tool(
-    'log_water',
-    '记录喝水。系统会自动累加到当天总喝水量中。',
+    'update_meal',
+    '修改一餐记录。只传要改的字段；可选营养素传 null 可清除。',
     {
-      date: z.string().describe('日期 YYYY-MM-DD'),
-      amountMl: z.number().min(0).describe('喝水量（毫升）'),
-      source: z.enum(['manual', 'reminder_auto', 'quick_button']).optional().default('manual').describe('记录来源'),
+      id: z.string(),
+      date: dateSchema.optional(),
+      time: z.string().nullable().optional(),
+      mealType: z.enum(MEAL_TYPES).optional(),
+      description: z.string().min(1).optional(),
+      estimated: z.boolean().nullable().optional(),
+      ...Object.fromEntries(Object.entries(coreNutrientShape).map(([k, s]) => [k, s.optional()])),
+      ...Object.fromEntries(Object.entries(optionalNutrientShape).map(([k, s]) => [k, s.nullable()])),
     },
-    async (input) => {
-      // Create water intake record
-      const waterId = generateId('water');
-      const water: WaterIntakeRecord = {
-        id: waterId,
-        date: input.date,
-        amountMl: input.amountMl,
-        recordedAt: nowISO(),
-        source: input.source,
-      };
-      await upsertDocPlain(collectionPath(WATER_COLLECTION), waterId, water as unknown as Record<string, unknown>);
-
-      // Recalculate daily nutrition (getOrCreateDailyNutrition sums all water records)
-      const nutrition = await getOrCreateDailyNutrition(input.date);
-      const nutritionId = `nutrition-${input.date}`;
-      // getOrCreateDailyNutrition already sums ALL water records, so no need to add again
-      await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ success: true, water, dailyWaterMl: nutrition.waterMl }, null, 2),
-        }],
-      };
-    }
-  );
-
-  server.tool(
-    'get_daily_nutrition',
-    '获取指定日期的营养概览。包含所有餐食记录、喝水量和营养目标及完成进度。',
-    {
-      date: z.string().optional().describe('日期 YYYY-MM-DD，默认今天'),
-    },
-    async ({ date }) => {
-      const targetDate = date || todayStr();
-      const nutrition = await getOrCreateDailyNutrition(targetDate);
-
-      // Also return meal records for the day
-      const meals = (await fetchCollection(collectionPath(MEALS_COLLECTION))) as unknown as MealRecord[];
-      const todayMeals = meals.filter(m => m.date === targetDate);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            date: targetDate,
-            nutrition,
-            meals: todayMeals,
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  server.tool(
-    'set_nutrition_goals',
-    '设置每日营养目标。只传入需要修改的目标字段。',
-    {
-      date: z.string().optional().describe('日期 YYYY-MM-DD，默认今天（目标全局适用）'),
-      calories: z.number().min(0).optional().describe('热量目标（千卡）'),
-      proteinG: z.number().min(0).optional().describe('蛋白质目标（克）'),
-      fatMinG: z.number().min(0).optional().describe('脂肪最低摄入（克）'),
-      fatMaxG: z.number().min(0).optional().describe('脂肪最高摄入（克）'),
-      sodiumMg: z.number().min(0).optional().describe('钠目标（毫克）'),
-      waterMl: z.number().min(0).optional().describe('喝水目标（毫升）'),
-    },
-    async (input) => {
-      const targetDate = input.date || todayStr();
-      const nutrition = await getOrCreateDailyNutrition(targetDate);
-      const nutritionId = targetDate;
-
-      if (input.calories !== undefined) nutrition.caloriesGoal = input.calories;
-      if (input.proteinG !== undefined) nutrition.proteinGoalG = input.proteinG;
-      if (input.fatMinG !== undefined) nutrition.fatMinGoalG = input.fatMinG;
-      if (input.fatMaxG !== undefined) nutrition.fatMaxGoalG = input.fatMaxG;
-      if (input.sodiumMg !== undefined) nutrition.sodiumGoalMg = input.sodiumMg;
-      if (input.waterMl !== undefined) nutrition.waterGoalMl = input.waterMl;
-
-      await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ success: true, nutrition }, null, 2),
-        }],
-      };
+    async ({ id, ...patch }) => {
+      const existing = await getHealthDoc<Meal>(MEALS, id);
+      if (!existing) return jsonResult({ success: false, error: `Meal ${id} not found` });
+      const updated = mergePatch(existing as Record<string, unknown>, patch) as Meal;
+      updated.updatedAt = nowISO();
+      await saveHealthDoc(MEALS, id, updated as Record<string, unknown>);
+      return jsonResult({ success: true, meal: updated });
     }
   );
 
   server.tool(
     'delete_meal',
-    '删除一餐记录。删除后系统会重新计算当日营养总览。',
+    '删除一餐记录。',
     {
       mealId: z.string().describe('餐食记录 ID'),
-      date: z.string().describe('日期 YYYY-MM-DD'),
+      date: z.string().optional().describe('不再需要，保留是为了兼容'),
     },
-    async ({ mealId, date }) => {
-      // Delete meal record
-      await deleteDocById(collectionPath(MEALS_COLLECTION), mealId);
+    async ({ mealId }) => jsonResult({ success: await deleteHealthDoc(MEALS, mealId) })
+  );
 
-      // Force recalculate and save daily nutrition
-      const nutrition = await getOrCreateDailyNutrition(date);
-      const nutritionId = date;
-      await upsertDocPlain(collectionPath(NUTRITION_COLLECTION), nutritionId, nutrition as unknown as Record<string, unknown>);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ success: true, nutrition }, null, 2),
-        }],
-      };
+  server.tool(
+    'get_daily_nutrition',
+    '获取某一天吃了什么、营养总量，以及每项和目标相比是不足（low）、达标（ok）还是超标（high）。',
+    { date: dateSchema.optional().describe('默认今天') },
+    async ({ date }) => {
+      const d = date ?? todayStr();
+      const [summary, meals] = await Promise.all([nutritionSummary(d, d), listMeals(d, d)]);
+      return jsonResult({
+        date: d,
+        totals: summary.daily[0]?.totals ?? { ...emptyTotals(), waterMl: 0 },
+        vsTarget: summary.vsTarget,
+        shortfalls: summary.shortfalls,
+        excesses: summary.excesses,
+        nutrientCoverage: summary.nutrientCoverage,
+        meals,
+      });
     }
+  );
+
+  server.tool(
+    'get_nutrition_summary',
+    '分析一段时间的饮食：每天的营养总量、平均每天摄取 vs 目标、哪些长期不足或超标、各营养素有几天超出范围。默认最近 7 天。status=no_data 表示没有记录该营养素（不等于 0）。平均值只计算有记录的天数（daysWithDataPerNutrient）。nutrientCoverage 低于 0.7 时结论不可靠。',
+    {
+      startDate: dateSchema.optional(),
+      endDate: dateSchema.optional(),
+      includeDaily: z.boolean().optional().describe('是否附带每天明细，默认 true'),
+    },
+    async ({ startDate, endDate, includeDaily }) => {
+      const end = endDate ?? todayStr();
+      const start = startDate ?? addDays(end, -6);
+      const summary = await nutritionSummary(start, end);
+      return jsonResult(includeDaily === false ? { ...summary, daily: undefined } : summary);
+    }
+  );
+
+  server.tool(
+    'log_water',
+    '记录喝水，自动累加到当天总量。',
+    {
+      date: dateSchema.optional().describe('默认今天'),
+      amountMl: z.number().min(0).describe('喝水量（毫升）'),
+      source: z.enum(['manual', 'reminder_auto', 'quick_button']).optional().default('manual'),
+    },
+    async ({ date, amountMl, source }) => {
+      const id = generateId('water');
+      const water: WaterLog = { id, date: date ?? todayStr(), amountMl, source, recordedAt: nowISO() };
+      await saveHealthDoc(WATER, id, water as unknown as Record<string, unknown>);
+      const all = await listHealthDocs<WaterLog>(WATER, water.date, water.date);
+      return jsonResult({ success: true, water, dailyWaterMl: all.reduce((s, w) => s + (w.amountMl || 0), 0) });
+    }
+  );
+
+  // Food library: the AI saves foods the user eats often so repeat logs are fast and consistent.
+
+  server.tool(
+    'search_foods',
+    '在食物库搜索常吃的食物（按名称或别名）。记录饮食前先搜，找到就用 foodId 记录。不传 query 列出全部。',
+    { query: z.string().optional() },
+    async ({ query }) => {
+      const foods = await listHealthDocs<Food>(FOODS);
+      const q = query?.toLowerCase().trim();
+      const hits = q
+        ? foods.filter(f => [f.name, f.brand ?? '', ...(f.aliases ?? [])].some(s => s.toLowerCase().includes(q)))
+        : foods;
+      return jsonResult({ count: hits.length, foods: hits.sort((a, b) => a.name.localeCompare(b.name)) });
+    }
+  );
+
+  server.tool(
+    'save_food',
+    '把常吃的食物存进食物库（每份的营养数据）。同一种食物第二次出现，或用户提供包装营养标签时，主动保存。传 id 表示更新已有食物。',
+    {
+      id: z.string().optional(),
+      name: z.string().min(1),
+      aliases: z.array(z.string()).optional().describe('别名，如「鸡饭」「海南鸡饭」'),
+      brand: z.string().optional(),
+      serving: z.string().describe('一份是多少，如「1 碟」「100 g」「1 勺 (30 g)」'),
+      ...coreNutrientShape,
+      ...optionalNutrientShape,
+      notes: z.string().optional(),
+    },
+    async ({ id, ...fields }) => {
+      const existing = id ? await getHealthDoc<Food>(FOODS, id) : null;
+      if (id && !existing) return jsonResult({ success: false, error: `Food ${id} not found` });
+      const foodId = id ?? generateId('food');
+      const food: Food = { ...(existing ?? {}), ...fields, id: foodId, createdAt: existing?.createdAt ?? nowISO(), updatedAt: existing ? nowISO() : undefined };
+      await saveHealthDoc(FOODS, foodId, food as Record<string, unknown>);
+      return jsonResult({ success: true, food });
+    }
+  );
+
+  server.tool(
+    'delete_food',
+    '从食物库删除一个食物（不影响已记录的餐）。',
+    { id: z.string() },
+    async ({ id }) => jsonResult({ success: await deleteHealthDoc(FOODS, id) })
   );
 }
