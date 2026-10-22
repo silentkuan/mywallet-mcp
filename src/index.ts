@@ -18,6 +18,7 @@ import { registerLabReportTools } from './tools/labReports.js';
 import { registerWorkoutTools } from './tools/workouts.js';
 import { registerDailyMetricsTools } from './tools/dailyMetrics.js';
 import { registerHealthOverviewTools, HEALTH_INSTRUCTIONS } from './tools/healthOverview.js';
+import { registerEnergyTools } from './tools/energy.js';
 import { registerTravelTools } from './tools/travel.js';
 import { registerLifeDashboardTools } from './tools/lifeDashboard.js';
 import { registerContentTemplateTools } from './tools/contentTemplates.js';
@@ -55,7 +56,7 @@ function requireBearerToken(req: Request, res: Response, next: NextFunction): vo
 
 // Health check endpoint — use this to verify the server is running
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', server: 'mywallet-mcp', version: '1.1.0' });
+  res.json({ status: 'ok', server: 'mywallet-mcp', version: '1.2.0' });
 });
 
 // MCP protocol endpoint — requires Bearer token auth
@@ -64,7 +65,7 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   // mode requires a new instance for each connection to avoid the
   // "Already connected to a transport" error.
   const server = new McpServer(
-    { name: 'mywallet-mcp', version: '1.1.0' },
+    { name: 'mywallet-mcp', version: '1.2.0' },
     { instructions: HEALTH_INSTRUCTIONS },
   );
   registerTransactionTools(server);
@@ -81,6 +82,7 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerWorkoutTools(server);
   registerDailyMetricsTools(server);
   registerHealthOverviewTools(server);
+  registerEnergyTools(server);
   registerTravelTools(server);
   registerLifeDashboardTools(server);
   registerContentTemplateTools(server);
