@@ -94,12 +94,16 @@ export function computeEnergyBalance(
   }
   days.sort((a, b) => a.date.localeCompare(b.date));
   if (!days.length) return null;
-  const counted = days.filter(d => !d.excluded);
+  // No complete day in the range (e.g. only today): fall back to what is logged and flag it
+  const complete = days.filter(d => !d.excluded);
+  const provisional = !complete.length;
+  const counted = provisional ? days : complete;
   const avg = (f: (d: EnergyDay) => number) => (counted.length ? round(counted.reduce((s, d) => s + f(d), 0) / counted.length, 0) : null);
   const avgBalance = avg(d => d.balanceKcal);
   const total = counted.reduce((s, d) => s + d.balanceKcal, 0);
   return {
     countedDays: counted.length,
+    provisional,
     averageIntakeKcal: avg(d => d.intakeKcal),
     averageExpenditureKcal: avg(d => d.expenditureKcal),
     averageDailyBalanceKcal: avgBalance,
