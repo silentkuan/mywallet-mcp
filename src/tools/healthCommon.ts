@@ -14,6 +14,11 @@ export const HEALTH_COLLECTIONS = {
   water: 'waterIntake',
   foods: 'foodLibrary',
   supplements: 'supplementLogs',
+  exerciseLibrary: 'exerciseLibrary',
+  trainingPlan: 'trainingPlan',
+  coachModes: 'coachModes',
+  coachModeVersions: 'coachModeVersions',
+  workoutMergeArchive: 'workoutMergeArchive',
 } as const;
 
 export const HEALTH_PROFILE_DOC = () => `users/${config.TARGET_USER_ID}/healthProfile/main`;
@@ -44,6 +49,16 @@ export function nowISO(): string {
 
 export function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** Stable document id from an English name: "Goblet Squat" → "goblet-squat". */
+export function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Current time in the user's zone as HH:mm. */
+export function nowHHmm(): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 }
 
 export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format: YYYY-MM-DD');

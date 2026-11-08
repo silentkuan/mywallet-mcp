@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env*
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+backups
+.git

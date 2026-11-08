@@ -422,6 +422,42 @@ Update the user personal profile. Only provide fields to change; unspecified fie
 
 ---
 
+### 6. Gym coach
+
+Coaching in the gym from claude.ai. Everything lives in the existing `workouts` collection — sets logged by
+`log_set` and the Apple Watch summary from `merge_workout_summary` end up on the **same** workout.
+New collections: `exerciseLibrary`, `trainingPlan`, `coachModes`, `coachModeVersions`, `workoutMergeArchive`.
+
+| Tool | What it does |
+|------|--------------|
+| `log_set` | Log one finished set. Finds (or creates) today's strength workout; `setNo` that already exists replaces that set. `weight` + `unit` + `perSide` + `barKg` are kept as said, and `weightKg` (total kg) is computed. |
+| `get_exercise_history` | Last N sessions of an exercise (every set, best weight, volume) and the PR. Accepts Chinese names / aliases. |
+| `get_training_context` | This week's sessions and muscle groups, last date each group was trained, yesterday's groups, recent sleep / RHR / HRV, the weekly plan. |
+| `get_exercise` / `search_exercises` / `upsert_exercise` | Exercise library: names, aliases, cues, equipment, image search query. |
+| `get_training_plan` / `set_training_plan` | Weekly plan (mon–sun focus and target minutes). |
+| `list_coach_modes` / `get_coach_mode` / `upsert_coach_mode` / `get_coach_mode_history` / `rollback_coach_mode` | Coach modes stored in the DB. Every save is a new version with a full snapshot; rollback writes an old version as a new one. `gym-coach` v1 is seeded on first start. |
+| `merge_workout_summary` | Merge an Apple Watch screenshot into the day's workout: same date + compatible type + times overlapping or within 2 h. Returns `matched` / `created` / `ambiguous` (+ candidates). Never touches sets. |
+| `merge_workouts` | Merge two duplicate workouts. `dryRun` (default) previews and lists conflicts; applying archives the secondary before deleting it. |
+
+```jsonc
+// one set of barbell bench: 20 kg plates each side on a 20 kg bar → weightKg 60
+{ "name": "log_set", "arguments": { "exercise": { "name": "Bench Press", "equipment": "barbell", "muscleGroup": "chest" },
+  "set": { "type": "working", "weight": 20, "perSide": true, "barKg": 20, "reps": 8 } } }
+
+// Apple Watch "Traditional Strength Training" screenshot after the session
+{ "name": "merge_workout_summary", "arguments": { "date": "2026-11-08", "type": "strength", "startTime": "18:16",
+  "durationMin": 44, "activeKcal": 222, "maxHeartRate": 147 } }
+```
+
+Older workouts keep working unchanged: sets without the new fields read as before, and a missing `sources`
+is inferred from `source` (`apple_watch` → `apple-watch-screenshot`, otherwise `manual`).
+
+**Scripts** (run inside the container, against its `TARGET_USER_ID`):
+- `scripts/backfill-workouts.mjs [--apply]` — backs up raw workouts to `/app/backups`, adds `sources`, reports likely duplicates (never merges).
+- `scripts/test-gym-coach.mjs` — end-to-end check of every tool above plus the old workout tools. **Writes data — run it against a tester account only.**
+
+---
+
 ## Data Schemas
 
 ### `Transaction`
