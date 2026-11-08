@@ -22,6 +22,9 @@ import { registerEnergyTools } from './tools/energy.js';
 import { registerTravelTools } from './tools/travel.js';
 import { registerLifeDashboardTools } from './tools/lifeDashboard.js';
 import { registerContentTemplateTools } from './tools/contentTemplates.js';
+import { registerTrainingTools } from './tools/training.js';
+import { registerExerciseLibraryTools } from './tools/exerciseLibrary.js';
+import { registerCoachModeTools, seedCoachModes } from './tools/coachModes.js';
 import { registerOpenclawFileRoutes } from './openclawFilesRoutes.js';
 
 // Set up Express HTTP server with StreamableHTTP transport
@@ -86,6 +89,9 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerTravelTools(server);
   registerLifeDashboardTools(server);
   registerContentTemplateTools(server);
+  registerTrainingTools(server);
+  registerExerciseLibraryTools(server);
+  registerCoachModeTools(server);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
@@ -105,4 +111,5 @@ app.listen(config.PORT, () => {
   console.log(`   MCP endpoint : http://localhost:${config.PORT}/mcp`);
   console.log(`   Health check : http://localhost:${config.PORT}/health`);
   console.log(`   User ID      : ${config.TARGET_USER_ID}`);
+  seedCoachModes().catch(err => console.error('Failed to seed coach modes:', err));
 });

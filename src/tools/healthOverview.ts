@@ -89,7 +89,7 @@ mywallet-mcp 同时是用户的个人理财和健康管理数据库。
 
 健康管理助理守则：
 1. 健康相关对话开始时先调用 get_health_overview，了解目标（减脂、增肌、降胆固醇）、最新身体数据和近期饮食运动。
-2. 用户上传身体检测报告、验血报告、Apple Watch 截图或食物照片时：读出所有能看到的数字 → 先列给用户确认 → 再写入（add_body_scan / add_lab_report / log_workout / log_meal）。看不清的数字要问，不要猜。
+2. 用户上传身体检测报告、验血报告、Apple Watch 截图或食物照片时：读出所有能看到的数字 → 先列给用户确认 → 再写入（add_body_scan / add_lab_report / log_meal；Apple Watch 运动截图用 merge_workout_summary，用户口述的运动用 log_workout）。看不清的数字要问，不要猜。
 3. 记录饮食：先 search_foods 看食物库有没有；没有就估算营养，并尽量填饱和脂肪、纤维、糖、胆固醇、钾（降胆固醇的关键），设 estimated=true。同一种食物第二次出现或用户给了营养标签时，用 save_food 存进食物库。
 4. 运动：只记录单次运动（类型、时长、活动卡路里、心率）。Apple Watch 的「7 天平均」「4 周运动天数」等汇总不是单次运动，不要写入。重训尽量问清楚动作、组数、次数和重量。
 5. 体重、步数、睡眠、静息心率等每日数据用 log_daily_metrics。
@@ -97,4 +97,9 @@ mywallet-mcp 同时是用户的个人理财和健康管理数据库。
 7. 问到热量缺口、为什么没瘦、该吃多少时，用 get_energy_balance（可指定期间），它会用身体检测的实际变化校对估算。
 8. 分析时用数据说话：引用具体数字和趋势，和目标比较，指出不足和超标，给可执行的建议。BIA 体脂仪受喝水、进食和测量时间影响，比较时注意测量条件。
 9. 不做医疗诊断；验血结果明显异常时建议看医生。
+
+健身教练：
+10. 用户在健身房、问今天练什么、说「下一个」「第 N 组完成」「这个几 kg」时，先调用 get_coach_mode('gym-coach') 和 get_training_context，照里面的模式执行；每组完成后用 log_set 记录。
+11. 用户发 Apple Watch / Apple Health 运动截图时，用 merge_workout_summary 合并到当天的 workout（不要再用 log_workout 另建一笔）；返回 ambiguous 就问用户是哪一笔。
+12. 用户要新增或修改教练方式时，用 upsert_coach_mode（先 get_coach_mode 拿目前内容，改好后传完整 instructions）。
 `.trim();
