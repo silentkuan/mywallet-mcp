@@ -1,6 +1,7 @@
 // End-to-end check of the gym-coach tools against a running server (use a tester account!).
 //   MCP_URL=http://127.0.0.1:3010/mcp MCP_API_KEY=... node scripts/test-gym-coach.mjs
 // It writes test data: coach mode versions, a library entry, a plan, and workouts today/yesterday.
+// Expects no workouts today/yesterday — reset the tester with seed-tester.mjs before re-running.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -115,6 +116,7 @@ const merged = await call('merge_workouts', { primaryId: y1.workoutId, secondary
 const yAfter = (await call('get_workouts', { startDate: yesterday, endDate: yesterday })).workouts;
 check('merge_workouts applies and removes secondary', merged.success && !yAfter.some(w => w.id === y2.workout.id) && yAfter.find(w => w.id === y1.workoutId)?.activeKcal === 240, merged);
 check('merge archives the secondary', !!merged.archiveId, merged);
+check('placeholder 0 min duration takes the watch value', merged.workout?.durationMin === 42 && !merged.conflicts.some(c => c.field === 'durationMin'), merged.conflicts);
 
 // ── existing tools unchanged ──
 const old = await call('log_workout', { date: yesterday, type: 'walking', name: 'Regression walk', durationMin: 10, activeKcal: 40, source: 'manual' });

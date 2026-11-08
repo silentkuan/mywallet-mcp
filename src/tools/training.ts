@@ -73,6 +73,9 @@ const SUMMARY_FIELDS = [
 const MERGE_SCALAR_FIELDS = ['type', 'name', 'source', ...SUMMARY_FIELDS] as const;
 type ScalarField = typeof MERGE_SCALAR_FIELDS[number];
 
+// A coach-logged workout starts with durationMin 0 as a placeholder — it is not a measured value
+const isBlank = (field: string, v: unknown) => v === undefined || v === null || (field === 'durationMin' && v === 0);
+
 export type MergeConflict = { field: string; primary?: unknown; secondary?: unknown; kept?: unknown; note?: string };
 
 const setKey = (s: WorkoutSet) => [s.type ?? '', setTotalKg(s) ?? '', s.reps ?? '', s.durationSec ?? ''].join('|');
@@ -85,8 +88,8 @@ export function mergeWorkoutPair(primary: Workout, secondary: Workout, useSecond
   for (const field of MERGE_SCALAR_FIELDS) {
     const p = primary[field as ScalarField];
     const s = secondary[field as ScalarField];
-    if (s === undefined || s === null) continue;
-    if (p === undefined || p === null) { (merged as Record<string, unknown>)[field] = s; continue; }
+    if (isBlank(field, s)) continue;
+    if (isBlank(field, p)) { (merged as Record<string, unknown>)[field] = s; continue; }
     if (p !== s) {
       const kept = useSecondaryFor.includes(field) ? s : p;
       (merged as Record<string, unknown>)[field] = kept;
