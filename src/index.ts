@@ -9,6 +9,7 @@ import { registerStockTools } from './tools/stocks.js';
 import { registerBankAccountTools } from './tools/bankAccounts.js';
 import { registerBankRecordTools } from './tools/bankRecords.js';
 import { registerProfileTools } from './tools/profile.js';
+import { registerCategoryTools } from './tools/categories.js';
 import { registerTaskTools } from './tools/tasks.js';
 import { registerReminderTools } from './tools/reminders.js';
 import { registerNutritionTools } from './tools/nutrition.js';
@@ -76,6 +77,7 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerBankAccountTools(server);
   registerBankRecordTools(server);
   registerProfileTools(server);
+  registerCategoryTools(server);
   registerTaskTools(server);
   registerReminderTools(server);
   registerNutritionTools(server);
