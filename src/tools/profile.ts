@@ -2,7 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { fetchNamedDoc, saveNamedDoc } from '../firestore.js';
-import { UserProfile, UserSettings } from '../types.js';
+import { decodeSettings, BUILT_IN_CATEGORIES } from './categories.js';
+import { UserProfile } from '../types.js';
 
 export function registerProfileTools(server: McpServer): void {
 
@@ -26,22 +27,14 @@ export function registerProfileTools(server: McpServer): void {
   // Get user settings (custom categories + shortcuts)
   server.tool(
     'get_settings',
-    'Get the user settings including custom expense/income categories and transaction shortcuts.',
+    'Get the user settings: custom expense/income categories (plus their optional icon/colour), the built-in categories, and transaction shortcuts.',
     {},
     async () => {
-      const docPath = `users/${config.TARGET_USER_ID}/settings/main`;
-      const settings = await fetchNamedDoc(docPath);
-      if (!settings) {
-        // Return sensible empty defaults matching UserSettings shape
-        const empty: UserSettings = {
-          customExpenseCategories: [],
-          customIncomeCategories: [],
-          transactionShortcuts: [],
-        };
-        return { content: [{ type: 'text', text: JSON.stringify(empty, null, 2) }] };
-      }
+      // The web app stores settings encrypted; decode them the same way it does
+      const settings = decodeSettings(await fetchNamedDoc(`users/${config.TARGET_USER_ID}/settings/main`) ?? undefined);
+      const body = { ...settings, builtInExpenseCategories: BUILT_IN_CATEGORIES.EXPENSE, builtInIncomeCategories: BUILT_IN_CATEGORIES.INCOME };
       return {
-        content: [{ type: 'text', text: JSON.stringify(settings, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
       };
     }
   );
