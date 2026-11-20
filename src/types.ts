@@ -49,10 +49,17 @@ export interface TransactionShortcut {
   icon?: string;
 }
 
+// Optional look of a custom category, keyed by type then category name
+export interface CategoryStyle {
+  icon?: string;   // emoji
+  color?: string;  // #RRGGBB
+}
+
 export interface UserSettings {
   customExpenseCategories: string[];
   customIncomeCategories: string[];
   transactionShortcuts: TransactionShortcut[];
+  categoryStyles?: Partial<Record<'EXPENSE' | 'INCOME', Record<string, CategoryStyle>>>;
 }
 
 export interface Transaction {

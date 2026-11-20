@@ -386,18 +386,64 @@ Get the user personal profile (gender, age, height, weight, activity level).
 
 #### `get_settings`
 
-Get the user settings including custom expense/income categories and transaction shortcuts.
+Get the user settings: custom expense/income categories (with optional icon/colour), the built-in categories, and transaction shortcuts. The web app stores settings encrypted; this tool returns them decrypted.
 
 **Input parameters:** none
 
-**Returns:** `UserSettings` object. If no settings exist, returns empty defaults:
+**Returns:** `UserSettings` plus the built-in lists. If no settings exist, the lists are empty:
 ```json
 {
-  "customExpenseCategories": [],
+  "customExpenseCategories": ["Gym"],
   "customIncomeCategories": [],
-  "transactionShortcuts": []
+  "transactionShortcuts": [],
+  "categoryStyles": { "EXPENSE": { "Gym": { "icon": "🏋️", "color": "#22c55e" } } },
+  "builtInExpenseCategories": ["Food", "Transport", "..."],
+  "builtInIncomeCategories": ["Salary", "..."]
 }
 ```
+
+---
+
+#### `add_category`
+
+Add a custom category. A name that already exists (any letter case, built-ins included) is not added again; if `icon`/`color` are given for an existing custom category, they are updated instead. The web app's category menus update at once.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | Yes | 1–40 characters. |
+| `type` | `"EXPENSE" \| "INCOME"` | Yes | |
+| `icon` | `string` | No | Emoji shown next to the name. |
+| `color` | `string` | No | `#RRGGBB`. |
+
+**Returns:** `{ "success": true, "type": "EXPENSE", "added": true, "category": "Pets" }` or `{ ..., "added": false, "reason": "already exists" }`.
+
+---
+
+#### `rename_category`
+
+Rename a custom category. Transactions and shortcuts using the old name move to the new one. Built-in categories cannot be renamed; renaming onto an existing name is refused (use `delete_category` with `moveTo` to merge).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `type` | `"EXPENSE" \| "INCOME"` | Yes | |
+| `from` | `string` | Yes | Current name. |
+| `to` | `string` | Yes | New name. |
+| `dryRun` | `boolean` | No | Only report how many transactions/shortcuts would change. |
+
+---
+
+#### `delete_category`
+
+Delete a custom category. Refused while transactions or shortcuts use it, unless `moveTo` names another category of the same type to move them to. Built-in categories cannot be deleted. Refused when some transactions cannot be decrypted (their category is unknown).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `type` | `"EXPENSE" \| "INCOME"` | Yes | |
+| `name` | `string` | Yes | Custom category to delete. |
+| `moveTo` | `string` | No | Existing category that takes over its transactions and shortcuts. |
+| `dryRun` | `boolean` | No | Only report what would change. |
+
+**Returns:** `{ "success": true, "deleted": "Pets", "movedTo": "Other", "transactionsMoved": 3, "shortcutsMoved": 0 }`, or `{ "success": false, "error": "...", "transactions": 3, "shortcuts": 0 }` when it is still in use.
 
 ---
 
@@ -547,8 +593,13 @@ is inferred from `source` (`apple_watch` → `apple-watch-screenshot`, otherwise
   customExpenseCategories: string[];
   customIncomeCategories: string[];
   transactionShortcuts: TransactionShortcut[];
+  // optional, added for category icons/colours; keyed by type, then category name
+  categoryStyles?: { EXPENSE?: Record<string, { icon?: string; color?: string }>; INCOME?: Record<...> };
 }
 ```
+
+Stored in `users/{uid}/settings/main` as `{ id: "main", encryptedData }` (same as the web app).
+Built-in categories live in the web app's code (`EXPENSE_CATEGORIES` / `INCOME_CATEGORIES`), mirrored in `src/tools/categories.ts`.
 
 ### `TransactionShortcut`
 
