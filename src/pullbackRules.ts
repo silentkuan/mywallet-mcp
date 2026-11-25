@@ -48,7 +48,8 @@ export function evaluate({ plan, events, alerts, state, today, closes }: Evaluat
 
     // A close back above the high the pullback started from ends it; all tiers can fire again next time
     if (episode && last.close >= episode.refHigh) episode = null;
-    if (!episode && drawdownPct >= tierRules(2)[0].dropPct) {
+    // Before the plan starts there is no reserve: only watch the price
+    if (!episode && month >= plan.startMonth && drawdownPct >= tierRules(2)[0].dropPct) {
       episode = { refHigh: high52, startDate: last.date, mode: tierMode(plan, available), firedTiers: [] };
     }
     if (episode) {

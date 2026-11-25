@@ -106,12 +106,18 @@ r2 = evaluate({ plan: bigPlan, events: [ev({ month: '2026-11', amount: 1 })], al
 assert.equal(r2.state.release, null);
 
 // No money: alert still says the tier fired, with 0
-const fresh = defaultPlan('2027-01');
-r = evaluate({ plan: fresh, events: [], alerts: [], state: emptyState(), today: '2026-12-16', closes: { QQQM: series(100, 89), SPYM: series(100, 99) } });
+const fresh = defaultPlan('2026-12');
+r = evaluate({ plan: fresh, events: [{ ...ev({ month: '2026-12', amount: 450 }) }], alerts: [], state: emptyState(), today: '2026-12-16', closes: { QQQM: series(100, 89), SPYM: series(100, 99) } });
 assert.equal(r.newAlerts[0].suggestedAmount, 0);
 
 // Price error keeps the previous episode
 r = evaluate({ plan: sixMonths, events: [], alerts: [], state: emptyState(), today: '2026-12-16', closes: { QQQM: series(100, 90), SPYM: { error: 'down' } } });
 assert.equal(r.state.watch.SPYM.error, 'down');
+
+// Plan not started yet: watch only, no episode or alert
+r = evaluate({ plan: defaultPlan('2027-01'), events: [], alerts: [], state: emptyState(), today: '2026-12-16', closes: { QQQM: series(100, 85), SPYM: series(100, 99) } });
+assert.equal(r.newAlerts.length, 0);
+assert.equal(r.state.watch.QQQM.episode, null);
+assert.equal(r.state.watch.QQQM.drawdownPct, 15);
 
 console.log('all investment plan tests passed');
