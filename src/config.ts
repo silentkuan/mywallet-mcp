@@ -15,6 +15,11 @@ const envSchema = z.object({
   // Bearer token required on every request to /mcp
   MCP_API_KEY: z.string().min(1),
   PORT: z.coerce.number().default(3000),
+  // Monthly investment plan: daily pullback check (Singapore hour) and optional Telegram alerts
+  INVEST_CHECKER: z.enum(['on', 'off']).default('on'),
+  INVEST_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(7),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
