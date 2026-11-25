@@ -228,8 +228,11 @@ export function registerInvestmentPlanTools(server: McpServer): void {
 
   server.tool(
     'check_pullback_now',
-    '立刻检查一次回调（平时每天新加坡时间早上自动检查）。notify=true 时新提醒也会发 Telegram。',
-    { notify: z.boolean().optional().describe('默认 false') },
-    async ({ notify }) => json(await runInvestmentCheck({ notify: notify ?? false, scheduled: false })),
+    '立刻检查一次回调（平时每天新加坡时间早上自动检查）。notify=true 时新提醒也会发 Telegram。useClaude=true 时让 Claude 上网独立核对每只股票的收盘价和 52 周最高价（约 1–3 分钟）；否则 Claude 只核对新触发的提醒。',
+    {
+      notify: z.boolean().optional().describe('默认 false'),
+      useClaude: z.boolean().optional().describe('让 Claude 核对所有监测中的股票，默认 false'),
+    },
+    async ({ notify, useClaude }) => json(await runInvestmentCheck({ notify: notify ?? false, scheduled: false, claude: useClaude ? 'all' : 'alerts' })),
   );
 }

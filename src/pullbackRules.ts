@@ -103,6 +103,20 @@ export function evaluate({ plan, events, alerts, state, today, closes }: Evaluat
   return { state: { ...state, watch, release }, newAlerts };
 }
 
+function claudeLines(a: InvestAlert): string[] {
+  const c = a.claude;
+  if (!c) return [];
+  if (c.status === 'ok') return [`✅ Claude 已核对：收盘 ${c.lastClose}（${c.lastCloseDate ?? '-'}），52 周最高 ${c.high52}`];
+  if (c.status === 'mismatch') {
+    return [
+      '⚠️ 数据不一致，请先确认再买',
+      `   网站：收盘 ${a.price}，最高 ${a.refHigh}`,
+      `   Claude：收盘 ${c.lastClose}（${c.lastCloseDate ?? '-'}），最高 ${c.high52}`,
+    ];
+  }
+  return [`❔ Claude 无法核对（${c.note ?? '没有回应'}），以网站数据为准`];
+}
+
 export function alertMessage(plan: InvestmentPlan, a: InvestAlert, balance: number): string {
   if (a.kind === 'release') {
     return `💰 回调资金已经 ${plan.idleMonths} 个月没用了，开始分 ${plan.releaseMonths} 个月释放\n` +
@@ -112,6 +126,7 @@ export function alertMessage(plan: InvestmentPlan, a: InvestAlert, balance: numb
   const next = rules[a.tier ?? 1];
   const lines = [
     `🔔 ${a.symbol} 比 52 周最高价便宜 ${a.drawdownPct}%（${a.price} / 最高 ${a.refHigh}）`,
+    ...claudeLines(a),
     `${a.mode === 3 ? '三' : '两'}档模式 · 第${['一', '二', '三'][(a.tier ?? 1) - 1]}档触发`,
     a.suggestedAmount > 0
       ? `建议：用回调资金 ${money(plan, a.suggestedAmount)} 买 ${a.symbol}`

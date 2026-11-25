@@ -61,6 +61,17 @@ export interface PullbackEpisode {
   firedTiers: number[];    // tier numbers (1-based) already alerted
 }
 
+// Claude's independent read of the same numbers (closing price and 52-week closing high)
+export interface ClaudeCheck {
+  status: 'ok' | 'mismatch' | 'unavailable';
+  lastClose?: number;
+  lastCloseDate?: string;
+  high52?: number;
+  url?: string;
+  note?: string;
+  checkedAt: string;
+}
+
 export interface SymbolWatch {
   symbol: string;
   lastClose: number;
@@ -70,6 +81,7 @@ export interface SymbolWatch {
   episode: PullbackEpisode | null;
   source?: string;
   error?: string;
+  claude?: ClaudeCheck;
 }
 
 export interface ReleaseState {
@@ -100,6 +112,7 @@ export interface InvestAlert {
   suggestedAmount: number; // plan currency
   status: 'open' | 'done' | 'dismissed';
   createdAt: string;
+  claude?: ClaudeCheck;
 }
 
 // ── Months ──────────────────────────────────────────────────────────────────
@@ -280,4 +293,29 @@ export function monthSummary(plan: InvestmentPlan, events: InvestEvent[], releas
     releaseSymbol: active ? releaseSymbolFor(plan, month) : null,
     releaseDone: mine.some(e => e.type === 'reserve_use' && e.reason === 'release'),
   };
+}
+
+// ── Claude cross-check ──────────────────────────────────────────────────────
+
+export const CLAUDE_TOLERANCE_PCT = 1.5;
+
+export interface ClaudePullbackAnswer {
+  lastClose?: number;
+  lastCloseDate?: string;
+  high52?: number;
+  url?: string;
+}
+
+const pctDiff = (a: number, b: number): number => Math.abs(a - b) / b * 100;
+
+// Same close and 52-week high within 1.5% → ok; otherwise mismatch with the reason
+export function compareWithClaude(ours: { lastClose: number; high52: number }, answer: ClaudePullbackAnswer | null, checkedAt: string): ClaudeCheck {
+  if (!answer || !(answer.lastClose && answer.lastClose > 0) || !(answer.high52 && answer.high52 > 0)) {
+    return { status: 'unavailable', checkedAt, note: 'Claude did not return both numbers' };
+  }
+  const base: ClaudeCheck = { status: 'ok', lastClose: answer.lastClose, lastCloseDate: answer.lastCloseDate, high52: answer.high52, url: answer.url, checkedAt };
+  const problems: string[] = [];
+  if (pctDiff(answer.lastClose, ours.lastClose) > CLAUDE_TOLERANCE_PCT) problems.push('close');
+  if (pctDiff(answer.high52, ours.high52) > CLAUDE_TOLERANCE_PCT) problems.push('52-week high');
+  return problems.length ? { ...base, status: 'mismatch', note: `different ${problems.join(' and ')}` } : base;
 }

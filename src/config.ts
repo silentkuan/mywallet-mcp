@@ -20,6 +20,9 @@ const envSchema = z.object({
   INVEST_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(7),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
+  // Claude checker on the host (same one the web backend uses), to cross-check pullback alerts
+  VERIFIER_SOCKET: z.string().default('/run/claude-verifier/verifier.sock'),
+  VERIFIER_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

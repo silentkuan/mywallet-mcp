@@ -7,6 +7,8 @@ services:
       - "3000:3000"
     volumes:
       - /root/.openclaw/workspace:/root/.openclaw/workspace:rw
+      # Claude checker on the host (mywalletAI/claude-verifier) — cross-checks pullback alerts
+      - /run/claude-verifier:/run/claude-verifier
     env_file:
       - .env
     healthcheck:
