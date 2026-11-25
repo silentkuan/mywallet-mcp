@@ -18,6 +18,8 @@ const envSchema = z.object({
   // Monthly investment plan: daily pullback check (Singapore hour) and optional Telegram alerts
   INVEST_CHECKER: z.enum(['on', 'off']).default('on'),
   INVEST_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(7),
+  // Her period reminder (Singapore hour)
+  HER_REMIND_HOUR: z.coerce.number().int().min(0).max(23).default(18),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   // Claude checker on the host (same one the web backend uses), to cross-check pullback alerts

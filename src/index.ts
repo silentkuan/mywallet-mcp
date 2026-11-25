@@ -28,6 +28,8 @@ import { registerExerciseLibraryTools } from './tools/exerciseLibrary.js';
 import { registerCoachModeTools, seedCoachModes } from './tools/coachModes.js';
 import { registerInvestmentPlanTools } from './tools/investmentPlan.js';
 import { startInvestmentScheduler } from './pullbackChecker.js';
+import { registerHerTools } from './tools/her.js';
+import { startHerScheduler } from './herReminder.js';
 import { registerOpenclawFileRoutes } from './openclawFilesRoutes.js';
 
 // Set up Express HTTP server with StreamableHTTP transport
@@ -97,6 +99,7 @@ app.all('/mcp', requireBearerToken, async (req, res) => {
   registerExerciseLibraryTools(server);
   registerCoachModeTools(server);
   registerInvestmentPlanTools(server);
+  registerHerTools(server);
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
@@ -118,4 +121,5 @@ app.listen(config.PORT, () => {
   console.log(`   User ID      : ${config.TARGET_USER_ID}`);
   seedCoachModes().catch(err => console.error('Failed to seed coach modes:', err));
   startInvestmentScheduler();
+  startHerScheduler();
 });
