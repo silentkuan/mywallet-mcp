@@ -1,7 +1,8 @@
 // Daily pullback check for the monthly investment plan.
 // Reads a year of closes for every stock the reserve may buy, follows each pullback through its tiers,
 // starts/stops the idle-reserve release, writes alerts and sends them to Telegram.
-import { InvestAlert, SymbolWatch, reserveBalance, monthSummary, monthOf, sgToday } from './investPlan.js';
+import { InvestAlert, SymbolWatch, ClaudeCheck, reserveBalance, monthSummary, monthOf, sgToday, compareWithClaude } from './investPlan.js';
+import { claudePullback } from './verifier.js';
 import { fetchDailyCloses } from './prices.js';
 import { CloseResult, evaluate, alertMessage, monthlyMessage } from './pullbackRules.js';
 import { getPlan, getState, saveState, getEvents, getAlerts, saveAlert } from './investStore.js';
@@ -16,7 +17,9 @@ export interface CheckResult {
   telegramSent: number;
 }
 
-export async function runInvestmentCheck(opts: { notify: boolean; scheduled: boolean }): Promise<CheckResult> {
+// Claude checks the numbers behind new tier alerts ('alerts'), every watched stock ('all') or nothing ('none').
+// It never blocks an alert: a mismatch or no answer is written on the alert instead.
+export async function runInvestmentCheck(opts: { notify: boolean; scheduled: boolean; claude?: 'alerts' | 'all' | 'none' }): Promise<CheckResult> {
   const plan = await getPlan();
   if (!plan) return { ran: false, reason: 'no plan', newAlerts: [], watch: {}, telegramSent: 0 };
   const [events, alerts, state] = await Promise.all([getEvents(), getAlerts(), getState()]);
@@ -30,6 +33,24 @@ export async function runInvestmentCheck(opts: { notify: boolean; scheduled: boo
   }
 
   const { state: next, newAlerts } = evaluate({ plan, events, alerts, state, today, closes });
+
+  const claudeMode = opts.claude ?? 'alerts';
+  const toCheck = claudeMode === 'all'
+    ? Object.values(next.watch).filter(w => !w.error && w.lastClose > 0).map(w => w.symbol)
+    : claudeMode === 'alerts' ? [...new Set(newAlerts.filter(a => a.kind === 'tier').map(a => a.symbol))] : [];
+  if (toCheck.length) {
+    const answers = await claudePullback(toCheck.map(symbol => ({ symbol, market: plan.holdings.find(h => h.symbol === symbol)?.market ?? 'US' })));
+    const checkedAt = new Date().toISOString();
+    for (const symbol of toCheck) {
+      const w = next.watch[symbol];
+      const check: ClaudeCheck = answers
+        ? compareWithClaude(w, answers.get(symbol) ?? null, checkedAt)
+        : { status: 'unavailable', checkedAt, note: 'Claude checker not reachable' };
+      next.watch[symbol] = { ...w, claude: check };
+      newAlerts.forEach((a, i) => { if (a.symbol === symbol) newAlerts[i] = { ...a, claude: check }; });
+    }
+    console.log(`[invest] claude check: ${toCheck.map(sym => `${sym}=${next.watch[sym].claude?.status}`).join(', ')}`);
+  }
   const messages: string[] = [];
   const balance = reserveBalance(plan, events, month);
 

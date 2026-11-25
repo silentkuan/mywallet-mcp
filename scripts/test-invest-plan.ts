@@ -4,7 +4,8 @@ import {
   defaultPlan, buildRotation, symbolForMonth, monthlySplit, reserveBalance, withAmount, monthSummary, addMonths, monthsBetween,
   InvestEvent, InvestmentState, InvestAlert,
 } from '../src/investPlan.js';
-import { evaluate, CloseResult } from '../src/pullbackRules.js';
+import { evaluate, CloseResult, alertMessage } from '../src/pullbackRules.js';
+import { compareWithClaude } from '../src/investPlan.js';
 
 const plan = defaultPlan('2026-12');
 const ev = (e: Partial<InvestEvent>): InvestEvent => ({ id: Math.random().toString(), type: 'reserve_use', date: '2027-01-01', month: '2027-01', amount: 0, createdAt: '2027-01-01T00:00:00Z', ...e });
@@ -119,5 +120,18 @@ r = evaluate({ plan: defaultPlan('2027-01'), events: [], alerts: [], state: empt
 assert.equal(r.newAlerts.length, 0);
 assert.equal(r.state.watch.QQQM.episode, null);
 assert.equal(r.state.watch.QQQM.drawdownPct, 15);
+
+// Claude cross-check
+const ours = { lastClose: 262.78, high52: 312.76 };
+assert.equal(compareWithClaude(ours, { lastClose: 263.5, high52: 312.76 }, 't').status, 'ok');
+const mm = compareWithClaude(ours, { lastClose: 262.8, high52: 320.5 }, 't');
+assert.equal(mm.status, 'mismatch');
+assert.equal(mm.note, 'different 52-week high');
+assert.equal(compareWithClaude(ours, { lastClose: 262.8 }, 't').status, 'unavailable');
+assert.equal(compareWithClaude(ours, null, 't').status, 'unavailable');
+const tierAlert: InvestAlert = { id: 'a', kind: 'tier', date: '2026-12-01', month: '2026-12', symbol: 'QQQM', tier: 1, mode: 2, drawdownPct: 16, price: 262.78, refHigh: 312.76, suggestedAmount: 225, status: 'open', createdAt: '' };
+assert.ok(alertMessage(plan, { ...tierAlert, claude: mm }, 450).includes('⚠️ 数据不一致'));
+assert.ok(alertMessage(plan, { ...tierAlert, claude: compareWithClaude(ours, { lastClose: 263, high52: 312.7, lastCloseDate: '2026-11-28' }, 't') }, 450).includes('✅ Claude 已核对'));
+console.log(alertMessage(plan, { ...tierAlert, claude: mm }, 450));
 
 console.log('all investment plan tests passed');
