@@ -16,7 +16,9 @@ export const LAB_CODES: Record<string, { name: string; category: string }> = {
   NON_HDL: { name: 'Non-HDL cholesterol', category: 'lipid' },
   TC_HDL_RATIO: { name: 'TC / HDL ratio', category: 'lipid' },
   FBG: { name: 'Fasting glucose', category: 'glucose' },
+  GLU: { name: 'Glucose (fasting not stated)', category: 'glucose' },
   HBA1C: { name: 'HbA1c', category: 'glucose' },
+  HBA1C_IFCC: { name: 'HbA1c (IFCC, mmol/mol)', category: 'glucose' },
   ALT: { name: 'ALT', category: 'liver' },
   AST: { name: 'AST', category: 'liver' },
   GGT: { name: 'GGT', category: 'liver' },
@@ -37,13 +39,18 @@ export const LAB_CODES: Record<string, { name: string; category: string }> = {
   CRP: { name: 'CRP / hs-CRP', category: 'inflammation' },
   SBP: { name: 'Systolic blood pressure', category: 'vitals' },
   DBP: { name: 'Diastolic blood pressure', category: 'vitals' },
+  GC_SCORE: { name: 'GASTROClear gastric cancer risk score', category: 'screening' },
 };
 
 const itemSchema = z.object({
   code: z.string().describe(`标准代码，尽量用：${Object.keys(LAB_CODES).join(', ')}；不在列表里就用简短的大写英文代码`),
   name: z.string().describe('报告上的项目名称'),
-  category: z.enum(['lipid', 'glucose', 'liver', 'kidney', 'blood', 'thyroid', 'vitamin', 'inflammation', 'vitals', 'urine', 'other']).optional(),
-  value: z.number(),
+  category: z.enum(['lipid', 'glucose', 'liver', 'kidney', 'blood', 'thyroid', 'vitamin', 'inflammation', 'vitals', 'urine', 'screening', 'other']).optional(),
+  value: z.number().describe('数值；纯文字结果（如 Low Risk）用报告上的分数，没有分数就不要记这一项'),
+  resultText: z.string().optional().describe('文字结果，照报告原样，如 "Low Risk"'),
+  refText: z.string().optional().describe('报告上印的参考范围原文，如 "<5.2"、">=1.0"、"0.0–39.9 Low Risk"'),
+  altValue: z.number().optional().describe('报告同时给的第二种单位的数值，如胆固醇的 mg/dL'),
+  altUnit: z.string().optional(),
   unit: z.string().describe('照报告原样，如 mmol/L、mg/dL、%'),
   refLow: z.number().optional().describe('参考范围下限'),
   refHigh: z.number().optional().describe('参考范围上限'),
@@ -53,14 +60,15 @@ const itemSchema = z.object({
 const reportShape = {
   date: dateSchema.describe('采血 / 检测日期'),
   provider: z.string().optional().describe('化验所 / 诊所'),
-  fasting: z.boolean().optional(),
+  fasting: z.boolean().optional().describe('报告或用户说明空腹才填；没写就不填'),
+  reportDate: dateSchema.optional().describe('报告发出日期（比采样日期晚时）'),
   items: z.array(itemSchema).min(1),
   doctorComments: z.string().optional(),
   notes: z.string().optional(),
 };
 
 type LabItem = z.infer<typeof itemSchema>;
-export type LabReport = { id: string; date: string; provider?: string; fasting?: boolean; items: LabItem[]; doctorComments?: string; notes?: string; createdAt: string; updatedAt?: string };
+export type LabReport = { id: string; date: string; provider?: string; fasting?: boolean; reportDate?: string; items: LabItem[]; doctorComments?: string; notes?: string; createdAt: string; updatedAt?: string };
 
 function normalizeItem(item: LabItem): LabItem {
   const known = LAB_CODES[item.code.toUpperCase()];
@@ -96,7 +104,7 @@ export function registerLabReportTools(server: McpServer): void {
 
   server.tool(
     'add_lab_report',
-    '记录一份验血 / 化验报告（血脂、血糖、肝肾功能、血常规等），也可用于血压。每个项目要有数值、单位和参考范围。单位照报告原样；同一项目尽量和之前的报告用同一单位，方便看趋势。写入前先列给用户确认。',
+    '记录一份验血 / 化验报告（血脂、血糖、肝肾功能、血常规等），也可用于血压和癌症筛查（如 GASTROClear：分数记在 value，Low Risk 等文字记在 resultText，category=screening）。每个项目要有数值、单位和参考范围；参考范围原文记在 refText，报告同时给两种单位时第二种记在 altValue/altUnit。单位照报告原样；同一项目尽量和之前的报告用同一单位，方便看趋势。写入前先列给用户确认。',
     reportShape,
     async (input) => {
       const id = generateId('lab');
